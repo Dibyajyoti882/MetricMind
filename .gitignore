@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+.next/
+out/
+
+# dbt
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
+
+# Data / warehouse
+*.duckdb
+*.duckdb.wal
+data/*.csv
+!data/generate_mock_data.py
+
+# Env
+.env
+.env.local
+
+# OS
+.DS_Store
