@@ -1,0 +1,12 @@
+{
+  "name": "metricmind-semantic",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "cubejs-server"
+  },
+  "dependencies": {
+    "@cubejs-backend/server": "^0.35.0",
+    "@cubejs-backend/duckdb-driver": "^0.35.0"
+  }
+}
