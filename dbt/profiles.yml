@@ -1,0 +1,17 @@
+metricmind:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: '../warehouse.duckdb'
+      threads: 4
+    prod:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE') }}"
+      database: METRICMIND
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE') }}"
+      schema: analytics
+      threads: 4
