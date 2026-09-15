@@ -1,0 +1,19 @@
+version: 2
+
+models:
+  - name: fct_sales
+    description: >
+      Governed fact table: one row per order with revenue, cost and margin
+      already computed. This is the ONLY place margin math happens.
+    columns:
+      - name: order_id
+        tests: [unique, not_null]
+      - name: revenue
+        tests: [not_null]
+      - name: margin
+        tests: [not_null]
+      - name: region
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["Europe", "North America", "APAC"]
