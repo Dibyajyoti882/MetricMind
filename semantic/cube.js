@@ -1,7 +1,10 @@
 module.exports = {
+  schemaPath: 'schema',
+
   dbType: process.env.CUBEJS_DB_TYPE || 'duckdb',
 
-  apiSecret: process.env.CUBEJS_API_SECRET || 'metricmind-local-secret',
+  apiSecret:
+    process.env.CUBEJS_API_SECRET || 'metricmind-local-secret',
 
   queryRewrite: (query, { securityContext }) => {
     if (!query.limit) {
