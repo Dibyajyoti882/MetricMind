@@ -1,14 +1,19 @@
-export const metadata = {
+import type { Metadata } from "next";
+import "./globals.css";
+
+export const metadata: Metadata = {
   title: "MetricMind",
-  description: "Governed conversational BI",
+  description: "Governed conversational business intelligence",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
     <html lang="en">
-      <body style={{ margin: 0, fontFamily: "system-ui, sans-serif", background: "#fafafa" }}>
-        {children}
-      </body>
+      <body>{children}</body>
     </html>
   );
 }
