@@ -4,16 +4,16 @@ Wires the LLM + the single semantic-layer tool into a LangChain agent.
 """
 import os
 from langchain.agents import AgentExecutor, create_tool_calling_agent
-from langchain_anthropic import ChatAnthropic
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from app.agent.prompts import SYSTEM_PROMPT
 from app.agent.tools import query_semantic_layer_tool
 
-_llm = ChatAnthropic(
-    model=os.getenv("AGENT_MODEL", "claude-sonnet-4-6"),
+_llm = ChatGoogleGenerativeAI(
+    model=os.getenv("AGENT_MODEL", "gemini-2.5-flash"),
     temperature=0,
-    anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
+    google_api_key=os.getenv("GOOGLE_API_KEY"),
 )
 
 _prompt = ChatPromptTemplate.from_messages([
