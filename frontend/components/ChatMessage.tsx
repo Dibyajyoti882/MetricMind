@@ -1,5 +1,8 @@
 "use client";
 
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
 import TransparencyPanel from "./TransparencyPanel";
 import type { TransparencyStep } from "@/lib/api";
 
@@ -17,12 +20,12 @@ export default function ChatMessage({
   const isUser = message.role === "user";
 
   return (
-    <div className={`chat-message ${isUser ? "user-message" : "assistant-message"}`}>
-      {!isUser && (
-        <div className="chat-avatar">
-          M
-        </div>
-      )}
+    <div
+      className={`chat-message ${
+        isUser ? "user-message" : "assistant-message"
+      }`}
+    >
+      {!isUser && <div className="chat-avatar">M</div>}
 
       <div className={`message-column ${isUser ? "user-column" : ""}`}>
         <div className="message-label">
@@ -35,16 +38,22 @@ export default function ChatMessage({
           }`}
         >
           <div className="message-content">
-            {message.content}
+            {isUser ? (
+              message.content
+            ) : (
+              <div className="markdown-content">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {message.content}
+                </ReactMarkdown>
+              </div>
+            )}
           </div>
 
           {!isUser &&
             message.transparency &&
             message.transparency.length > 0 && (
               <div className="transparency-wrapper">
-                <TransparencyPanel
-                  steps={message.transparency}
-                />
+                <TransparencyPanel steps={message.transparency} />
               </div>
             )}
         </div>
