@@ -2,7 +2,7 @@
 Owner: Member 4 (AI / Agent Engineer)
 Defines the ONE tool the agent has for getting numbers: query_semantic_layer.
 """
-from langchain.tools import StructuredTool
+from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
 from app.semantic_client import cube_client

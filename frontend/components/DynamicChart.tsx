@@ -7,12 +7,36 @@ function pickChartableStep(
   steps: TransparencyStep[]
 ): TransparencyStep | null {
   for (let i = steps.length - 1; i >= 0; i--) {
-    if (steps[i].data && steps[i].data!.length > 1) {
-      return steps[i];
+    const step = steps[i];
+
+    if (step?.data && step.data.length > 1) {
+      return step;
     }
   }
 
   return null;
+}
+
+function cleanLabel(key: string): string {
+  return key
+    .replace(/^.*\./, "")
+    .replace(/([A-Z])/g, " $1")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase())
+    .trim();
+}
+
+function isNumericValue(value: unknown): boolean {
+  if (typeof value === "number") {
+    return Number.isFinite(value);
+  }
+
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed);
+  }
+
+  return false;
 }
 
 export default function DynamicChart({
@@ -34,15 +58,33 @@ export default function DynamicChart({
     return null;
   }
 
-  const measureKey =
-    keys.find((key) => key.includes(".")) ??
-    keys[keys.length - 1];
+  /*
+   * Find columns containing numeric values.
+   * These are treated as measures.
+   */
+  const numericKeys = keys.filter((key) =>
+    rows.some((row) => isNumericValue(row[key]))
+  );
 
+  if (numericKeys.length === 0) {
+    return null;
+  }
+
+  /*
+   * Use the last numeric column as the primary measure.
+   * This works well with Cube responses where dimensions
+   * are strings and measures are numeric.
+   */
+  const measureKey = numericKeys[numericKeys.length - 1];
+
+  /*
+   * Choose the first non-numeric column as the dimension.
+   */
   const dimensionKey =
-    keys.find((key) => key !== measureKey) ?? keys[0];
+    keys.find((key) => !numericKeys.includes(key)) ?? keys[0];
 
   const categories = rows.map((row) =>
-    String(row[dimensionKey])
+    String(row[dimensionKey] ?? "")
   );
 
   const values = rows.map((row) => {
@@ -50,56 +92,101 @@ export default function DynamicChart({
     return Number.isFinite(value) ? value : 0;
   });
 
+  const dimensionLabel = cleanLabel(dimensionKey);
+  const measureLabel = cleanLabel(measureKey);
+
+  const lowerDimension = dimensionKey.toLowerCase();
+
   const isTimeSeries =
-    dimensionKey.toLowerCase().includes("date") ||
-    dimensionKey.toLowerCase().includes("time") ||
-    dimensionKey.toLowerCase().includes("quarter") ||
-    dimensionKey.toLowerCase().includes("month");
+    lowerDimension.includes("date") ||
+    lowerDimension.includes("time") ||
+    lowerDimension.includes("quarter") ||
+    lowerDimension.includes("month") ||
+    lowerDimension.includes("year");
 
   const option = {
     animationDuration: 700,
 
     tooltip: {
       trigger: "axis",
+      axisPointer: {
+        type: "shadow",
+      },
+      formatter: (params: Array<{ axisValue: string; value: number }>) => {
+        const item = params[0];
+
+        if (!item) {
+          return "";
+        }
+
+        return `
+          <div style="font-weight:600;margin-bottom:4px;">
+            ${item.axisValue}
+          </div>
+          <div>
+            ${measureLabel}: <strong>${item.value}</strong>
+          </div>
+        `;
+      },
     },
 
     grid: {
-      left: 45,
+      left: 55,
       right: 25,
-      top: 25,
-      bottom: 35,
+      top: 30,
+      bottom: 45,
       containLabel: true,
     },
 
     xAxis: {
       type: "category",
       data: categories,
+      boundaryGap: !isTimeSeries,
+
       axisLine: {
         lineStyle: {
           color: "#dfe3eb",
         },
       },
+
+      axisTick: {
+        show: false,
+      },
+
       axisLabel: {
         color: "#788296",
         fontSize: 11,
+        interval: 0,
+        rotate: categories.length > 7 ? 30 : 0,
       },
     },
 
     yAxis: {
       type: "value",
+
+      axisLine: {
+        show: false,
+      },
+
+      axisTick: {
+        show: false,
+      },
+
+      axisLabel: {
+        color: "#788296",
+        fontSize: 11,
+      },
+
       splitLine: {
         lineStyle: {
           color: "#eef0f4",
         },
       },
-      axisLabel: {
-        color: "#788296",
-        fontSize: 11,
-      },
     },
 
     series: [
       {
+        name: measureLabel,
         data: values,
         type: isTimeSeries ? "line" : "bar",
         smooth: isTimeSeries,
@@ -112,7 +199,9 @@ export default function DynamicChart({
 
         itemStyle: {
           color: "#4f46e5",
-          borderRadius: isTimeSeries ? 0 : [6, 6, 0, 0],
+          borderRadius: isTimeSeries
+            ? 0
+            : [6, 6, 0, 0],
         },
 
         areaStyle: isTimeSeries
@@ -120,6 +209,8 @@ export default function DynamicChart({
               opacity: 0.08,
             }
           : undefined,
+
+        symbolSize: isTimeSeries ? 7 : undefined,
 
         emphasis: {
           focus: "series",
@@ -137,7 +228,7 @@ export default function DynamicChart({
           </div>
 
           <div className="chart-subtitle">
-            {dimensionKey} vs {measureKey}
+            {dimensionLabel} vs {measureLabel}
           </div>
         </div>
       </div>
@@ -145,7 +236,7 @@ export default function DynamicChart({
       <ReactECharts
         option={option}
         style={{
-          height: 300,
+          height: 320,
           width: "100%",
         }}
       />
