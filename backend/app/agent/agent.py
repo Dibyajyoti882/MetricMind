@@ -1,130 +1,132 @@
 """
-Owner: Member 4 (AI / Agent Engineer)
-Wires the LLM + the single semantic-layer tool into a LangChain agent.
+LangChain agent with ONE tool (the governed semantic layer).
+LLM is built lazily (a missing key no longer crashes startup); any LLM failure becomes a
+single LLMUnavailableError with a readable reason; identical questions are cached.
 """
-
-import json
 import os
-
-from langchain.agents import create_agent
-from langchain_google_genai import ChatGoogleGenerativeAI
+import threading
+import time
 
 from app.agent.prompts import SYSTEM_PROMPT
 from app.agent.tools import query_semantic_layer_tool
 
-
-_llm = ChatGoogleGenerativeAI(
-    model=os.getenv("AGENT_MODEL", "gemini-3.8-flash"),
-    temperature=0,
-    google_api_key=os.getenv("GOOGLE_API_KEY"),
-)
-
-_tools = [query_semantic_layer_tool]
-
-_agent = create_agent(
-    model=_llm,
-    tools=_tools,
-    system_prompt=SYSTEM_PROMPT,
-)
+CACHE_TTL = int(os.getenv("AGENT_CACHE_TTL", "600"))
+MAX_ITERATIONS = int(os.getenv("AGENT_MAX_ITERATIONS", "5"))
 
 
-def _parse_tool_output(content):
-    """Convert a tool message into a Python dictionary when possible."""
-    if isinstance(content, dict):
-        return content
-
-    if isinstance(content, str):
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError:
-            return {}
-
-    return {}
+class LLMUnavailableError(Exception):
+    """The LLM could not be used (quota, credits, key, retired model...)."""
 
 
-def _message_text(content) -> str:
-    """Extract readable text from a LangChain message content value."""
-    if isinstance(content, str):
-        return content
+_executor = None
+_lock = threading.Lock()
+_cache: dict = {}
 
-    if isinstance(content, list):
-        parts = []
 
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict):
-                if item.get("text"):
-                    parts.append(str(item["text"]))
+def _provider() -> str:
+    explicit = os.getenv("LLM_PROVIDER", "").strip().lower()
+    if explicit:
+        return explicit
+    if os.getenv("ANTHROPIC_API_KEY"):
+        return "anthropic"
+    if os.getenv("XAI_API_KEY"):
+        return "xai"
+    return "gemini"
 
-        return "".join(parts)
 
-    return str(content)
+def _build_llm():
+    provider = _provider()
+    model = os.getenv("AGENT_MODEL", "")
+    try:
+        if provider == "anthropic":
+            key = os.getenv("ANTHROPIC_API_KEY")
+            if not key:
+                raise LLMUnavailableError("ANTHROPIC_API_KEY is not set.")
+            from langchain_anthropic import ChatAnthropic
+            return ChatAnthropic(model=model or "claude-sonnet-4-6", temperature=0,
+                                 anthropic_api_key=key)
+        if provider == "xai":
+            key = os.getenv("XAI_API_KEY")
+            if not key:
+                raise LLMUnavailableError("XAI_API_KEY is not set.")
+            from langchain_openai import ChatOpenAI
+            return ChatOpenAI(model=model or "grok-4.1-fast", temperature=0,
+                              api_key=key, base_url="https://api.x.ai/v1")
+        if provider == "gemini":
+            key = os.getenv("GOOGLE_API_KEY")
+            if not key:
+                raise LLMUnavailableError("GOOGLE_API_KEY is not set.")
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            return ChatGoogleGenerativeAI(model=model or "gemini-3.5-flash-lite",
+                                          temperature=0, google_api_key=key)
+        raise LLMUnavailableError(f"Unknown LLM_PROVIDER '{provider}'.")
+    except ImportError as e:
+        raise LLMUnavailableError(f"Package for provider '{provider}' is not installed: {e}")
+
+
+def _get_executor():
+    global _executor
+    with _lock:
+        if _executor is None:
+            from langchain.agents import AgentExecutor, create_tool_calling_agent
+            from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+
+            llm = _build_llm()
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", SYSTEM_PROMPT),
+                ("human", "{input}"),
+                MessagesPlaceholder("agent_scratchpad"),
+            ])
+            tools = [query_semantic_layer_tool]
+            agent = create_tool_calling_agent(llm, tools, prompt)
+            _executor = AgentExecutor(
+                agent=agent, tools=tools, max_iterations=MAX_ITERATIONS,
+                return_intermediate_steps=True, handle_parsing_errors=True,
+            )
+        return _executor
+
+
+def explain_llm_error(e: Exception) -> str:
+    low = f"{type(e).__name__}: {e}".lower()
+    if "429" in low or "resource_exhausted" in low or "quota" in low or "rate limit" in low:
+        return "The LLM quota/rate limit is exhausted. Wait a minute, or switch API key/provider."
+    if "credit balance" in low:
+        return "The LLM account has no credit. Add credit or switch provider."
+    if "no longer available" in low or "not found" in low or "404" in low:
+        return "The configured model is retired/unavailable. Change AGENT_MODEL in backend/.env."
+    if "thought_signature" in low:
+        return "This Gemini model needs thought-signature support. Use another model/provider."
+    if any(k in low for k in ("api key", "api_key", "401", "403", "permission", "unauthorized", "workspace")):
+        return "The LLM API key was rejected. Check the key and account settings in backend/.env."
+    return f"The LLM call failed ({type(e).__name__})."
 
 
 def ask(question: str) -> dict:
-    """
-    Ask MetricMind a question and return the final answer
-    together with semantic-layer transparency information.
-    """
+    key = " ".join(question.lower().split())
+    hit = _cache.get(key)
+    if hit and time.time() - hit[0] < CACHE_TTL:
+        return {**hit[1], "cached": True}
 
-    result = _agent.invoke(
-        {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": question,
-                }
-            ]
-        }
-    )
-
-    messages = result.get("messages", [])
+    try:
+        executor = _get_executor()
+        result = executor.invoke({"input": question})
+    except LLMUnavailableError:
+        raise
+    except Exception as e:
+        raise LLMUnavailableError(explain_llm_error(e)) from e
 
     transparency = []
+    for action, observation in result.get("intermediate_steps", []):
+        obs = observation if isinstance(observation, dict) else {}
+        transparency.append({
+            "tool": action.tool,
+            "tool_input": action.tool_input,
+            "query": obs.get("query"),
+            "generated_sql": obs.get("generated_sql"),
+            "data": obs.get("data"),
+            "error": obs.get("error"),
+        })
 
-    # Collect tool calls and their corresponding tool results.
-    for i, message in enumerate(messages):
-        tool_calls = getattr(message, "tool_calls", None)
-
-        if not tool_calls:
-            continue
-
-        for tool_call in tool_calls:
-            tool_call_id = tool_call.get("id")
-            tool_name = tool_call.get("name", "")
-            tool_input = tool_call.get("args", {})
-
-            observation = {}
-
-            # Find the matching ToolMessage.
-            for next_message in messages[i + 1:]:
-                if getattr(next_message, "tool_call_id", None) == tool_call_id:
-                    observation = _parse_tool_output(
-                        getattr(next_message, "content", "")
-                    )
-                    break
-
-            transparency.append(
-                {
-                    "tool": tool_name,
-                    "tool_input": tool_input,
-                    "query": observation.get("query"),
-                    "generated_sql": observation.get("generated_sql"),
-                    "data": observation.get("data"),
-                }
-            )
-
-    # The last AI message should contain the final answer.
-    answer = ""
-
-    for message in reversed(messages):
-        if getattr(message, "type", None) == "ai":
-            answer = _message_text(getattr(message, "content", ""))
-            if answer:
-                break
-
-    return {
-        "answer": answer,
-        "transparency": transparency,
-    }
+    out = {"answer": result["output"], "transparency": transparency, "mode": "agent"}
+    _cache[key] = (time.time(), out)
+    return out
